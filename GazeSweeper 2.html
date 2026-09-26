@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>GazeSweeper</title>
+  <style>
+    :root {
+      --bg: #0b0c0e;
+      --bone: #c8c2b4;
+      --ash: #2a2c30;
+      --cell: #16181c;
+      --cell-2: #1c1f24;
+      --red: #8b1e1e;
+      --red-hot: #c43a3a;
+      --blue: #6b8eae;
+      --blue-dim: #3d5a73;
+      --safe: #9aa3a0;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%; background: var(--bg); color: var(--bone);
+      font-family: "Palatino Linotype", Palatino, "Times New Roman", serif;
+      overflow: hidden;
+    }
+    button, select {
+      font-family: inherit; cursor: pointer;
+    }
+    #cam-wrap {
+      position: fixed; right: 10px; bottom: max(10px, env(safe-area-inset-bottom));
+      z-index: 40; width: 128px;
+    }
+    #cam-wrap span {
+      display: block; font-size: 9px; letter-spacing: .12em; color: var(--blue);
+      text-align: center; margin-bottom: 3px;
+    }
+    #cam {
+      width: 128px; height: 96px; display: block;
+      object-fit: cover; transform: scaleX(-1);
+      border: 1px solid #3a3d42; opacity: 0.75;
+      background: #000; border-radius: 2px;
+    }
+    #cursor {
+      position: fixed; width: 28px; height: 28px; margin: -14px 0 0 -14px;
+      border: 2px solid var(--red-hot); border-radius: 50%;
+      pointer-events: none; z-index: 50; opacity: 0;
+      box-shadow: 0 0 10px rgba(196,58,58,0.45);
+      transition: width .08s, height .08s, margin .08s;
+    }
+    #cursor.focused {
+      width: 36px; height: 36px; margin: -18px 0 0 -18px;
+      border-color: var(--blue);
+      box-shadow: 0 0 14px rgba(107,142,174,0.7);
+    }
+    #hud {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px 8px; gap: 10px; flex-wrap: wrap;
+    }
+    #hud h1 {
+      margin: 0; font-size: 15px; letter-spacing: .18em; font-weight: 500;
+    }
+    .stat {
+      font-variant-numeric: tabular-nums; font-size: 14px; color: var(--blue);
+      min-width: 3ch;
+    }
+    .stat.mines { color: var(--red-hot); }
+    #controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    #controls button, #controls select {
+      background: var(--ash); color: var(--bone); border: 1px solid #3a3d42;
+      padding: 6px 10px; font-size: 13px;
+    }
+    #board-wrap {
+      display: flex; justify-content: center; align-items: flex-start;
+      padding: 4px 10px 90px;
+    }
+    #board {
+      display: grid;
+      gap: 3px;
+      touch-action: none;
+      user-select: none;
+    }
+    .cell {
+      width: var(--cs, 52px); height: var(--cs, 52px);
+      background: var(--cell);
+      border: 1px solid #2e3238;
+      display: flex; align-items: center; justify-content: center;
+      font-size: calc(var(--cs, 52px) * 0.42);
+      color: var(--bone);
+      position: relative;
+    }
+    .cell.alt { background: var(--cell-2); }
+    .cell.gaze {
+      outline: 2px solid var(--red-hot);
+      outline-offset: -2px;
+    }
+    .cell.armed {
+      outline: 3px solid var(--blue);
+      outline-offset: -2px;
+      box-shadow: inset 0 0 18px rgba(107,142,174,0.25);
+    }
+    .cell.open {
+      background: #0e1013;
+      border-color: #23262b;
+    }
+    .cell.mine.open { background: var(--red); color: var(--bone); }
+    .cell.flagged::after {
+      content: "▴";
+      color: var(--red-hot);
+      font-size: calc(var(--cs, 52px) * 0.5);
+    }
+    .n1 { color: #6b8eae; }
+    .n2 { color: #8aa88a; }
+    .n3 { color: #c43a3a; }
+    .n4 { color: #7a6cad; }
+    .n5 { color: #a35a3a; }
+    .n6 { color: #5a9aa3; }
+    .n7 { color: #c8c2b4; }
+    .n8 { color: #6a6d72; }
+
+    .overlay {
+      position: fixed; inset: 0; background: rgba(8,9,11,0.88);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 30; padding: 20px;
+    }
+    .overlay.hidden { display: none; }
+    .panel {
+      max-width: 440px; width: 100%;
+      border: 1px solid #3a3d42; background: #121417;
+      padding: 22px 22px 18px;
+    }
+    .panel h2 {
+      margin: 0 0 10px; letter-spacing: .14em; font-size: 16px; font-weight: 500;
+    }
+    .panel p { margin: 0 0 10px; line-height: 1.45; font-size: 14px; color: #b7b1a4; }
+    .panel kbd {
+      font-family: inherit; color: var(--blue); border-bottom: 1px solid var(--blue-dim);
+    }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+    .row button {
+      background: var(--ash); color: var(--bone); border: 1px solid #4a4e54;
+      padding: 10px 14px; font-size: 14px;
+    }
+    .row button.primary { border-color: var(--red); color: #edd; }
+    #cal-dot {
+      position: fixed; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+      background: var(--red-hot); border-radius: 50%; z-index: 35;
+      box-shadow: 0 0 16px var(--red-hot);
+    }
+    #status {
+      position: fixed; left: 10px; bottom: 10px; font-size: 12px;
+      color: #8a8580; z-index: 40; max-width: calc(100% - 160px);
+    }
+    #dwellbar {
+      position: fixed; left: 0; top: 0; height: 3px; width: 0; background: var(--blue);
+      z-index: 60; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="dwellbar"></div>
+  <div id="hud">
+    <h1>GAZESWEEPER</h1>
+    <div>▴ <span class="stat mines" id="mineCount">0</span></div>
+    <div id="clock" class="stat">000</div>
+    <div id="controls">
+      <select id="diff">
+        <option value="6,6,5" selected>Eyes · 6×6</option>
+        <option value="8,8,10">Field · 8×8</option>
+        <option value="9,9,12">Grave · 9×9</option>
+      </select>
+      <button type="button" id="btnNew">New</button>
+      <button type="button" id="btnCal">Calibrate</button>
+      <button type="button" id="btnHelp">Law</button>
+    </div>
+  </div>
+  <div id="board-wrap"><div id="board" role="grid"></div></div>
+  <div id="cam-wrap">
+    <span>FRONT CAMERA</span>
+    <video id="cam" autoplay playsinline muted></video>
+  </div>
+  <div id="cursor"></div>
+  <div id="status">Front camera dark.</div>
+
+  <div id="help" class="overlay">
+    <div class="panel">
+      <h2>THE LAW OF THE EYES</h2>
+      <p>The <kbd>front camera</kbd> of the phone watches your eyes. Not the rear lens. Not a tap. The irises move the ring. A blink digs. A wink flags.</p>
+      <p>Open this file in <kbd>Safari</kbd> (iPhone) or Chrome. Allow Camera when asked. Prop the phone so the small FRONT CAMERA window shows both of your eyes. Hold the device still after that.</p>
+      <p><kbd>Look</kbd> at a square until the ring turns blue. That is focus. A single blink is ignored — you still have to see. <kbd>Double blink</kbd> to dig. <kbd>Wink left</kbd> or hold a long blink to flag.</p>
+      <p>Nine red coins first: look, then blink. If you move the phone, calibrate again.</p>
+      <p>iPhone will not open the camera from a downloaded file, or from inside this chat. The page must run in <kbd>Safari</kbd> on a real website (https). A file in the Files app is not enough.</p>
+      <p id="secureNote"></p>
+      <div class="row">
+        <button type="button" class="primary" id="btnBegin">Open front camera</button>
+        <button type="button" id="btnPlayHands">Play with hands</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="camfail" class="overlay hidden">
+    <div class="panel">
+      <h2>THE LENS REFUSED</h2>
+      <p id="camfailText"></p>
+      <div class="row">
+        <button type="button" class="primary" id="btnFailHands">Play with hands</button>
+        <button type="button" id="btnFailRetry">Try the camera again</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="end" class="overlay hidden">
+    <div class="panel">
+      <h2 id="endTitle">CLEARED</h2>
+      <p id="endText"></p>
+      <div class="row">
+        <button type="button" class="primary" id="btnAgain">Another field</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { FilesetResolver, FaceLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm";
+
+    const $ = (id) => document.getElementById(id);
+    const boardEl = $("board");
+    const cursor = $("cursor");
+    const cam = $("cam");
+    const status = $("status");
+    const dwellbar = $("dwellbar");
+
+    const DWELL_MS = 700;
+    const BLINK_ON = 0.42;
+    const WINK_ON = 0.48;
+    const WINK_OFF = 0.28;
+    const LONG_BLINK_MS = 480;
+    const BLINK_COOLDOWN = 380;
+    const DOUBLE_BLINK_MS = 520;
+
+    let cols = 8, rows = 8, mineTarget = 10;
+    let grid = [];
+    let started = false, dead = false, won = false;
+    let flags = 0, opened = 0, t0 = 0, tick = null;
+    let landmarker = null, stream = null, running = false;
+    let gazeX = innerWidth / 2, gazeY = innerHeight / 2;
+    let smoothX = gazeX, smoothY = gazeY;
+    let lastArmed = null, dwellStart = 0, armedCell = null;
+    let blinkState = "open", blinkT = 0, lastAction = 0;
+    let lastShortBlink = 0;
+    let calibrating = false, calPoints = [], calIndex = 0, calSamples = [];
+    let mapX = { a: 1, b: 0 }, mapY = { a: 1, b: 0 };
+    let rawGaze = { x: 0.5, y: 0.5 };
+    let lastVideoTime = -1;
+    let handsOnly = false;
+
+    function parseDiff() {
+      const [c, r, m] = $("diff").value.split(",").map(Number);
+      cols = c; rows = r; mineTarget = m;
+    }
+
+    function sizeCells() {
+      const pad = 24;
+      const hud = 58;
+      const maxW = Math.min(innerWidth - pad, 560);
+      const maxH = innerHeight - hud - 88;
+      const cs = Math.floor(Math.min(maxW / cols, maxH / rows) - 3);
+      boardEl.style.setProperty("--cs", Math.max(36, cs) + "px");
+      boardEl.style.gridTemplateColumns = `repeat(${cols}, var(--cs))`;
+    }
+
+    function emptyCell(i) {
+      return { i, mine: false, open: false, flag: false, n: 0 };
+    }
+
+    function neighbors(i) {
+      const x = i % cols, y = (i / cols) | 0;
+      const out = [];
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          const nx = x + dx, ny = y + dy;
+          if (nx >= 0 && nx < cols && ny >= 0 && ny < rows) out.push(ny * cols + nx);
+        }
+      }
+      return out;
+    }
+
+    function plant(safeIndex) {
+      let planted = 0;
+      const forbid = new Set([safeIndex, ...neighbors(safeIndex)]);
+      while (planted < mineTarget) {
+        const i = (Math.random() * cols * rows) | 0;
+        if (grid[i].mine || forbid.has(i)) continue;
+        grid[i].mine = true;
+        planted++;
+      }
+      for (const c of grid) {
+        if (c.mine) continue;
+        c.n = neighbors(c.i).reduce((s, j) => s + (grid[j].mine ? 1 : 0), 0);
+      }
+    }
+
+    function render() {
+      boardEl.innerHTML = "";
+      grid.forEach((c, i) => {
+        const d = document.createElement("div");
+        d.className = "cell" + ((i + ((i / cols) | 0)) % 2 ? " alt" : "");
+        d.dataset.i = String(i);
+        if (c.open) {
+          d.classList.add("open");
+          if (c.mine) d.textContent = "●";
+          else if (c.n) {
+            d.textContent = String(c.n);
+            d.classList.add("n" + c.n);
+          }
+        } else if (c.flag) {
+          d.classList.add("flagged");
+        }
+        if (armedCell === i) d.classList.add("armed");
+        boardEl.appendChild(d);
+      });
+      $("mineCount").textContent = String(Math.max(0, mineTarget - flags));
+    }
+
+    function openCell(i) {
+      if (dead || won) return;
+      const c = grid[i];
+      if (c.open || c.flag) return;
+      if (!started) {
+        plant(i);
+        started = true;
+        t0 = Date.now();
+        tick = setInterval(() => {
+          const s = Math.min(999, ((Date.now() - t0) / 1000) | 0);
+          $("clock").textContent = String(s).padStart(3, "0");
+        }, 250);
+      }
+      if (c.mine) {
+        c.open = true;
+        dead = true;
+        grid.forEach((g) => { if (g.mine) g.open = true; });
+        render();
+        finish(false);
+        return;
+      }
+      const stack = [i];
+      while (stack.length) {
+        const k = stack.pop();
+        const cell = grid[k];
+        if (cell.open || cell.flag || cell.mine) continue;
+        cell.open = true;
+        opened++;
+        if (cell.n === 0) neighbors(k).forEach((n) => stack.push(n));
+      }
+      render();
+      if (opened === cols * rows - mineTarget) {
+        won = true;
+        finish(true);
+      }
+    }
+
+    function toggleFlag(i) {
+      if (dead || won) return;
+      const c = grid[i];
+      if (c.open) return;
+      c.flag = !c.flag;
+      flags += c.flag ? 1 : -1;
+      render();
+    }
+
+    function finish(ok) {
+      clearInterval(tick);
+      $("endTitle").textContent = ok ? "FIELD CLEARED" : "THE MINE";
+      $("endText").textContent = ok
+        ? "Every quiet square opened. The red marks held."
+        : "A buried charge. The board is honest now.";
+      $("end").classList.remove("hidden");
+    }
+
+    function newGame() {
+      parseDiff();
+      sizeCells();
+      grid = Array.from({ length: cols * rows }, (_, i) => emptyCell(i));
+      started = dead = won = false;
+      flags = opened = 0;
+      armedCell = lastArmed = null;
+      $("clock").textContent = "000";
+      clearInterval(tick);
+      $("end").classList.add("hidden");
+      render();
+    }
+
+    function cellFromPoint(x, y) {
+      const el = document.elementFromPoint(x, y);
+      if (!el || !el.classList.contains("cell")) return null;
+      return Number(el.dataset.i);
+    }
+
+    /* —— gaze math —— */
+    function mid(a, b) {
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    }
+    function irisInEye(landmarks, inner, outer, irisIdx) {
+      const a = landmarks[inner], b = landmarks[outer], iris = landmarks[irisIdx];
+      const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+      const w = Math.max(0.0001, Math.hypot(b.x - a.x, b.y - a.y));
+      return { x: (iris.x - cx) / w, y: (iris.y - cy) / w };
+    }
+    function estimateRaw(landmarks) {
+      // mirrored selfie: invert x so looking left aims left
+      const L = irisInEye(landmarks, 133, 33, 468);
+      const R = irisInEye(landmarks, 362, 263, 473);
+      const nose = landmarks[1];
+      return {
+        x: 1 - ((L.x + R.x) * 0.5 + 0.5),
+        y: (L.y + R.y) * 0.5 + 0.42 + (nose.y - 0.5) * 0.35
+      };
+    }
+    function applyMap(raw) {
+      return {
+        x: mapX.a * raw.x + mapX.b,
+        y: mapY.a * raw.y + mapY.b
+      };
+    }
+    function fitMap(samples) {
+      // screen = a * raw + b
+      function fit(getR, getS) {
+        const n = samples.length;
+        let sr = 0, ss = 0, sr2 = 0, srs = 0;
+        for (const s of samples) {
+          const r = getR(s), t = getS(s);
+          sr += r; ss += t; sr2 += r * r; srs += r * t;
+        }
+        const den = n * sr2 - sr * sr;
+        if (Math.abs(den) < 1e-6) return { a: 1, b: 0 };
+        const a = (n * srs - sr * ss) / den;
+        const b = (ss - a * sr) / n;
+        return { a, b };
+      }
+      mapX = fit((s) => s.rx, (s) => s.sx);
+      mapY = fit((s) => s.ry, (s) => s.sy);
+    }
+
+    const CAL_LAYOUT = [
+      [0.12, 0.16], [0.5, 0.16], [0.88, 0.16],
+      [0.12, 0.5], [0.5, 0.5], [0.88, 0.5],
+      [0.12, 0.84], [0.5, 0.84], [0.88, 0.84]
+    ];
+
+    function showCalDot() {
+      let dot = $("cal-dot");
+      if (!dot) {
+        dot = document.createElement("div");
+        dot.id = "cal-dot";
+        document.body.appendChild(dot);
+      }
+      const [px, py] = CAL_LAYOUT[calIndex];
+      dot.style.left = px * innerWidth + "px";
+      dot.style.top = py * innerHeight + "px";
+      status.textContent = "Look at the red coin. Blink. " + (calIndex + 1) + " / 9";
+    }
+
+    function startCal() {
+      calibrating = true;
+      calIndex = 0;
+      calSamples = [];
+      $("help").classList.add("hidden");
+      $("end").classList.add("hidden");
+      showCalDot();
+    }
+
+    function takeCalSample() {
+      const [px, py] = CAL_LAYOUT[calIndex];
+      calSamples.push({
+        rx: rawGaze.x, ry: rawGaze.y,
+        sx: px * innerWidth, sy: py * innerHeight
+      });
+      calIndex++;
+      if (calIndex >= CAL_LAYOUT.length) {
+        fitMap(calSamples);
+        calibrating = false;
+        const dot = $("cal-dot");
+        if (dot) dot.remove();
+        status.textContent = "Eyes locked. Look. Dwell. Double-blink to dig. Wink left to flag.";
+        return;
+      }
+      showCalDot();
+    }
+
+    function blend(result, name) {
+      const cats = result.faceBlendshapes?.[0]?.categories || [];
+      const hit = cats.find((c) => c.categoryName === name);
+      return hit ? hit.score : 0;
+    }
+
+    function onFrame(ts) {
+      if (!running || !landmarker) return;
+      const vt = cam.currentTime;
+      if (vt === lastVideoTime || cam.readyState < 2) {
+        requestAnimationFrame(onFrame);
+        return;
+      }
+      lastVideoTime = vt;
+      const res = landmarker.detectForVideo(cam, ts);
+      if (res.faceLandmarks && res.faceLandmarks[0]) {
+        rawGaze = estimateRaw(res.faceLandmarks[0]);
+        const mapped = applyMap(rawGaze);
+        gazeX = Math.max(8, Math.min(innerWidth - 8, mapped.x));
+        gazeY = Math.max(8, Math.min(innerHeight - 8, mapped.y));
+        const L = blend(res, "eyeBlinkLeft");
+        const R = blend(res, "eyeBlinkRight");
+        handleBlink(L, R);
+        status.textContent = calibrating
+          ? status.textContent
+          : "Face seen · blink " + Math.round(Math.max(L, R) * 100);
+      } else if (!calibrating) {
+        status.textContent = "No face. Light the eyes. Sit closer.";
+      }
+      requestAnimationFrame(onFrame);
+    }
+
+    function handleBlink(L, R) {
+      const both = L > BLINK_ON && R > BLINK_ON;
+      const leftWink = L > WINK_ON && R < WINK_OFF;
+      const now = performance.now();
+      if (both) {
+        if (blinkState === "open") {
+          blinkState = "closed";
+          blinkT = now;
+        }
+      } else {
+        if (blinkState === "closed") {
+          const held = now - blinkT;
+          blinkState = "open";
+          if (calibrating) {
+            if (now - lastAction > BLINK_COOLDOWN) {
+              lastAction = now;
+              takeCalSample();
+            }
+          } else if (held >= LONG_BLINK_MS) {
+            if (now - lastAction > BLINK_COOLDOWN) {
+              lastAction = now;
+              lastShortBlink = 0;
+              act("flag");
+            }
+          } else if (now - lastShortBlink < DOUBLE_BLINK_MS) {
+            lastShortBlink = 0;
+            lastAction = now;
+            act("open");
+          } else {
+            lastShortBlink = now;
+          }
+        }
+        if (leftWink && now - lastAction > BLINK_COOLDOWN && !calibrating) {
+          lastAction = now;
+          lastShortBlink = 0;
+          act("flag");
+        }
+      }
+    }
+
+    function act(kind) {
+      const target = armedCell != null ? armedCell : cellFromPoint(smoothX, smoothY);
+      if (target == null) return;
+      if (kind === "flag") toggleFlag(target);
+      else openCell(target);
+    }
+
+    function loopHud() {
+      smoothX += (gazeX - smoothX) * 0.28;
+      smoothY += (gazeY - smoothY) * 0.28;
+      if (!handsOnly && !calibrating && landmarker) {
+        cursor.style.opacity = "1";
+        cursor.style.left = smoothX + "px";
+        cursor.style.top = smoothY + "px";
+        const i = cellFromPoint(smoothX, smoothY);
+        document.querySelectorAll(".cell.gaze").forEach((el) => el.classList.remove("gaze"));
+        if (i != null) {
+          const el = boardEl.children[i];
+          if (el) el.classList.add("gaze");
+          if (lastArmed === i) {
+            const p = Math.min(1, (performance.now() - dwellStart) / DWELL_MS);
+            dwellbar.style.width = (p * 100) + "%";
+            if (p >= 1) {
+              armedCell = i;
+              cursor.classList.add("focused");
+              render();
+              document.querySelectorAll(".cell")[i]?.classList.add("armed");
+            }
+          } else {
+            lastArmed = i;
+            dwellStart = performance.now();
+            armedCell = null;
+            cursor.classList.remove("focused");
+            dwellbar.style.width = "0";
+          }
+        } else {
+          lastArmed = null;
+          armedCell = null;
+          cursor.classList.remove("focused");
+          dwellbar.style.width = "0";
+        }
+      }
+      requestAnimationFrame(loopHud);
+    }
+
+    function cameraFail(msg) {
+      $("camfailText").textContent = msg;
+      $("camfail").classList.remove("hidden");
+      $("help").classList.add("hidden");
+      status.textContent = "Front camera dark.";
+    }
+
+    async function openFrontCamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("NO_API");
+      }
+      const tryGet = (video) => navigator.mediaDevices.getUserMedia({ video, audio: false });
+      try {
+        return await tryGet({ facingMode: "user" });
+      } catch (_) { /* fall through */ }
+      try {
+        return await tryGet({ facingMode: { ideal: "user" } });
+      } catch (_) { /* fall through */ }
+      return await tryGet(true);
+    }
+
+    async function startEyes() {
+      status.textContent = "Opening the front camera…";
+      $("camfail").classList.add("hidden");
+      if (!window.isSecureContext) {
+        cameraFail("This page is not a secure site. iPhone blocks the camera on downloaded files and inside chat previews. Put GazeSweeper.html on a website (https) and open that link in Safari. Or play with hands on this copy.");
+        return;
+      }
+      try {
+        stream = await openFrontCamera();
+        cam.srcObject = stream;
+        cam.setAttribute("playsinline", "true");
+        cam.muted = true;
+        cam.playsInline = true;
+        await cam.play();
+        status.textContent = "Reading the face…";
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+        );
+        const model = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+        const opts = (delegate) => ({
+          baseOptions: { modelAssetPath: model, delegate },
+          runningMode: "VIDEO",
+          numFaces: 1,
+          outputFaceBlendshapes: true,
+          outputFacialTransformationMatrixes: true
+        });
+        try {
+          landmarker = await FaceLandmarker.createFromOptions(vision, opts("GPU"));
+        } catch (_) {
+          landmarker = await FaceLandmarker.createFromOptions(vision, opts("CPU"));
+        }
+        running = true;
+        handsOnly = false;
+        $("help").classList.add("hidden");
+        requestAnimationFrame(onFrame);
+        startCal();
+      } catch (err) {
+        console.error(err);
+        const name = err && (err.name || err.message) ? String(err.name || err.message) : "unknown";
+        if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+          cameraFail("Safari refused permission. Settings → Safari → Camera → Ask or Allow. Then reload this page and tap Open front camera again.");
+        } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+          cameraFail("No camera was found on this device.");
+        } else if (name === "NO_API") {
+          cameraFail("This browser will not expose a camera. Open the page in Safari.");
+        } else {
+          cameraFail("The lens failed (" + name + "). Open the page in Safari on https, allow Camera, and try once more.");
+        }
+      }
+    }
+
+    /* hands fallback */
+    let pressTimer = null, pressI = null;
+    boardEl.addEventListener("pointerdown", (e) => {
+      const el = e.target.closest(".cell");
+      if (!el) return;
+      pressI = Number(el.dataset.i);
+      pressTimer = setTimeout(() => {
+        toggleFlag(pressI);
+        pressTimer = null;
+      }, 480);
+    });
+    boardEl.addEventListener("pointerup", (e) => {
+      if (pressTimer) {
+        clearTimeout(pressTimer);
+        const el = e.target.closest(".cell");
+        if (el) openCell(Number(el.dataset.i));
+      }
+      pressTimer = null;
+    });
+    boardEl.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const el = e.target.closest(".cell");
+      if (el) toggleFlag(Number(el.dataset.i));
+    });
+
+    function playHands() {
+      handsOnly = true;
+      $("help").classList.add("hidden");
+      $("camfail").classList.add("hidden");
+      status.textContent = "Hands. Tap to open. Long-press to flag.";
+    }
+    $("btnBegin").onclick = startEyes;
+    $("btnPlayHands").onclick = playHands;
+    $("btnFailHands").onclick = playHands;
+    $("btnFailRetry").onclick = startEyes;
+    if ($("secureNote")) {
+      $("secureNote").textContent = window.isSecureContext
+        ? "This copy is on a secure page. The camera is allowed to ask."
+        : "This copy is not https. The iPhone will keep the lens shut until the file lives on a website.";
+    }
+    $("btnNew").onclick = newGame;
+    $("btnAgain").onclick = newGame;
+    $("btnCal").onclick = () => {
+      if (!landmarker) startEyes();
+      else startCal();
+    };
+    $("btnHelp").onclick = () => $("help").classList.remove("hidden");
+    $("diff").onchange = newGame;
+    addEventListener("resize", () => { sizeCells(); render(); });
+
+    newGame();
+    loopHud();
+  </script>
+</body>
+</html>
